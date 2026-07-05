@@ -5,7 +5,6 @@
 package app
 
 import (
-	"image"
 	"os"
 	"runtime"
 	"testing"
@@ -15,27 +14,8 @@ import (
 	"poly.red/gpu"
 )
 
-// requireOrSkip turns a skip into a hard failure when POLYRED_REQUIRE_WINDOW is
-// set. CI runs the windowed test in an environment where the display and the GL
-// runtime are guaranteed present (Xvfb + Mesa), so a skip there means the very
-// thing the test exists to prove silently did not run. On a bare dev box the env
-// var is unset and the test skips cleanly.
-func requireOrSkip(t *testing.T, format string, args ...any) {
-	t.Helper()
-	if os.Getenv("POLYRED_REQUIRE_WINDOW") != "" {
-		t.Fatalf("POLYRED_REQUIRE_WINDOW set but the windowed path is unavailable: "+format, args...)
-	}
-	t.Skipf(format, args...)
-}
-
-// solidRGBA returns a tightly-packed w*h RGBA image filled with c.
-func solidRGBA(w, h int, c [4]byte) *image.RGBA {
-	img := image.NewRGBA(image.Rect(0, 0, w, h))
-	for i := 0; i < len(img.Pix); i += 4 {
-		img.Pix[i], img.Pix[i+1], img.Pix[i+2], img.Pix[i+3] = c[0], c[1], c[2], c[3]
-	}
-	return img
-}
+// requireOrSkip and solidRGBA are shared with the Windows windowed-present test;
+// they live in present_helpers_test.go.
 
 // TestX11WindowedPresent drives the cgo-free X11 + GPU-Device windowed present
 // path end to end: open an X display, create+map a window, open the GL device,
