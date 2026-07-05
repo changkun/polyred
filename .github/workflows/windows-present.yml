@@ -1,0 +1,62 @@
+name: windows-present
+
+# Runs the Win32 + ANGLE windowed present path (TestWin32WindowedPresent) for real:
+# ANGLE (libEGL/libGLESv2/d3dcompiler) is not on the runner's PATH by default, but
+# it ships with Edge/Chrome; provision it, then run the test with
+# POLYRED_REQUIRE_WINDOW=1 so a skip (ANGLE missing / window surface failing) becomes
+# a hard failure. This is the Windows analog of the gl-probe x11-windowed-present job.
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  windows-present:
+    name: Win32 + ANGLE windowed present
+    timeout-minutes: 20
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - uses: actions/setup-go@v5
+      with:
+        go-version: '1.26.x'
+        check-latest: true
+
+    - name: Provision ANGLE (libEGL/libGLESv2/d3dcompiler from Edge or Chrome)
+      shell: pwsh
+      run: |
+        $roots = @(
+          "C:\Program Files (x86)\Microsoft\Edge\Application",
+          "C:\Program Files\Microsoft\Edge\Application",
+          "C:\Program Files\Google\Chrome\Application",
+          "C:\Program Files (x86)\Google\Chrome\Application"
+        )
+        $egl = $null
+        foreach ($r in $roots) {
+          if (Test-Path $r) {
+            $egl = Get-ChildItem $r -Recurse -Filter libEGL.dll -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($egl) { break }
+          }
+        }
+        if (-not $egl) { Write-Error "ANGLE libEGL.dll not found in Edge/Chrome"; exit 1 }
+        $dir = $egl.DirectoryName
+        Write-Host "ANGLE found in: $dir"
+        New-Item -ItemType Directory -Force -Path angle | Out-Null
+        Copy-Item "$dir\libEGL.dll" angle\ -Force
+        Copy-Item "$dir\libGLESv2.dll" angle\ -Force
+        Copy-Item "$dir\d3dcompiler_47.dll" angle\ -Force -ErrorAction SilentlyContinue
+        Get-ChildItem angle
+        "$((Get-Location).Path)\angle" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+    - name: Windowed present (Win32 + ANGLE)
+      env:
+        # Turn "no ANGLE runtime / window surface failed" skips into hard failures:
+        # this job provisions ANGLE, so a skip here would hide a real break.
+        POLYRED_REQUIRE_WINDOW: '1'
+      run: go test -run TestWin32WindowedPresent -v -timeout 10m ./app/
