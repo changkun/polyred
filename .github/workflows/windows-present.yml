@@ -5,6 +5,8 @@ name: windows-present
 # it ships with Edge/Chrome; provision it, then run the test with
 # POLYRED_REQUIRE_WINDOW=1 so a skip (ANGLE missing / window surface failing) becomes
 # a hard failure. This is the Windows analog of the gl-probe x11-windowed-present job.
+# A dedicated workflow (not a polyred matrix step) so the ANGLE provisioning is
+# isolated. ANGLE-on-WARP presents correctly headlessly on the windows-latest runner.
 
 on:
   push:
