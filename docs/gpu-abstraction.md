@@ -17,7 +17,11 @@ genuinely hard decision (the backend shape clash, §3), sketch the core types
 cgo-free question (§6), and describe how the abstraction folds into `polyred`
 and is consumed by the renderer (§7), followed by a phased roadmap (§8).
 
-### Current reality (what already exists)
+### Starting point (state when this design was written, 2026-06; kept as history)
+
+Every bullet and the conclusion below have since been overtaken: the `Device`
+API, the Go→shader compiler, and the Metal, GL and Vulkan backends all exist and
+are cgo-free. Current status lives in [`specs/README.md`](../specs/README.md).
 
 - `poly.red/x/gpu` (the sibling `../gpu` repo, never pushed to GitHub) holds raw
   driver bindings: **Metal** (`mtl/`, ~590 lines, cgo) and **OpenGL/GLES**
@@ -57,7 +61,9 @@ C library and would defeat the cgo-free goal (§6).
   subset polyred needs.
 - Replacing the CPU rasterizer. It stays as the reference / fallback path; the
   GPU path is additive.
-- Window/surface management beyond what `ctx/` already provides.
+- Window/surface management beyond what the renderer needs to present a frame.
+  (Superseded: `gpu/gl` and `gpu/ctx/egl` are gone; on-screen present now runs
+  through the Device API's `Surface`, `gpu/surface.go`.)
 
 ## 3. The core decision: which backend shape does the abstraction mirror?
 
@@ -327,9 +333,10 @@ shader modules instead of Go callbacks.
 
 The "aimed to be cgo free" goal dominates the architecture, so make it explicit.
 
-State today: Metal **and** GL both use cgo; only `internal/dl` (hand-rolled asm
-`dlopen`/`dlsym` trampolines) is cgo-free, and it is broken. Hand-rolling
-per-arch assembly trampolines is reinventing **purego**.
+State at decision time (since resolved: every backend is purego and the repo
+builds with `CGO_ENABLED=0`): Metal **and** GL both use cgo; only `internal/dl`
+(hand-rolled asm `dlopen`/`dlsym` trampolines) is cgo-free, and it is broken.
+Hand-rolling per-arch assembly trampolines is reinventing **purego**.
 
 **Decision (locked): cgo-free is a hard requirement.** No `import "C"` in any
 backend; every backend routes symbol loading through a purego-style loader from
@@ -410,8 +417,8 @@ Mechanics:
    moved low-level bindings.
 
 Renderer consumption (the directive's real test — the renderer must *use* it):
-- Add a `render.Backend` seam. `NewRenderer` gains an option `Backend(b)` where
-  `b` is `CPU` (today's path) or `GPU(dev *gpu.Device)`.
+- Add a backend seam on `NewRenderer`. (Shipped as `render.GPU(dev)` and
+  `render.CPU()`, with a device acquired automatically when neither is given.)
 - Implement `shader.Program` for GPU via a `GPUProgram` that carries shader
   modules; `FragmentBuffer` gains a GPU-texture-backed variant; `MVP` is uploaded
   to a uniform buffer each frame.

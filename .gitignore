@@ -17,3 +17,7 @@
 *.pprof
 *.txt
 *.trace
+
+# cmd/gpudemo default output (go run ./cmd/gpudemo)
+/triangle.png
+/cmd/gpudemo/triangle.png

@@ -12,8 +12,9 @@ _Warning: under experiment, expect to break at anytime._
 
 `poly.red/gpu` is a backend-agnostic GPU abstraction, a WebGPU-style
 `Device`/`Queue`/`Buffer`/`Pipeline`/`CommandEncoder` API for running **compute**
-and **rendering** pipelines, with a driver (Metal today) underneath. It is
-**cgo-free**: the Metal/Objective-C runtime is reached through
+and **rendering** pipelines, with swappable drivers underneath (Metal, OpenGL
+ES, Vulkan today). It is **cgo-free**: the Metal/Objective-C runtime, EGL/GLES
+and the Vulkan loader are all reached through
 [ebitengine/purego](https://github.com/ebitengine/purego), so it builds with
 `CGO_ENABLED=0`.
 
@@ -60,19 +61,22 @@ The design, decisions, and roadmap live in
 | `Device` API (buffers, bind groups, compute + render pipelines, passes, textures, samplers) | working |
 | Metal backend (compute + render), cgo-free via purego | working |
 | Go→shader compiler (compute + vertex/fragment, varyings, uniforms, vector + matrix math, swizzle, texture sampling, trig, control flow) | working |
-| **Renderer deferred pass fully offloaded to the GPU** (`render.GPU(dev)`): point + directional lights, multi-material, shadow maps (one and many casting lights), ambient occlusion, gamma | working, CPU-parity verified |
-| **OpenGL ES + Vulkan backends** (cgo-free, via purego): compute through the Device API verified in CI on Mesa (llvmpipe / lavapipe, software, headless); GL also does render-to-texture | working |
-| DirectX 12 backend, on-screen windowed present | planned, gated on Windows / a display, not design |
+| **Renderer deferred pass fully offloaded to the GPU**: point + directional lights, multi-material, shadow maps (one and many casting lights), ambient occlusion, gamma | working, CPU-parity verified |
+| **Renderer forward rasterizer on the GPU** (vertex transform, back-face cull, depth test, three-target G-buffer), the default pass on GL and Metal | working, parity-gated |
+| **OpenGL ES + Vulkan backends** (cgo-free, via purego): compute through the Device API verified in CI on Mesa (llvmpipe / lavapipe, software, headless); GL also does render-to-texture, depth + MRT, and on-screen window surfaces | working |
+| **On-screen windowed present** through the Device/Surface API: X11 (Xvfb + Mesa) and Win32 (ANGLE) proven on screen in CI; darwin drives the same present path in a test, but offscreen (no `CAMetalLayer` drawable yet) | working |
+| DirectX 12 backend, Vulkan render path | planned (the device and compute probes are green in CI) |
 
-The renderer offloads its full deferred shading pass to the GPU when a device is
-supplied:
+The renderer is GPU by default: `NewRenderer` acquires a device itself (Metal
+today) and falls back to the CPU per pass if that fails. Pass `render.GPU(dev)`
+to hand it a device of your own, or `render.CPU()` to force the CPU path:
 
 ```go
 dev, _ := gpu.Open()
 img := render.NewRenderer(
     render.Camera(cam), render.Size(w, h), render.Scene(s),
     render.ShadowMap(true),
-    render.GPU(dev), // deferred shading (lights, materials, shadows, AO) runs on the GPU
+    render.GPU(dev), // forward raster + deferred shading run on this device
 ).Render()
 ```
 
@@ -82,7 +86,7 @@ cgo-free build/test of the Metal GPU stack on darwin:
 CGO_ENABLED=0 go test ./gpu ./gpu/mtl ./gpu/shader ./gpu/tests
 ```
 
-CI runs build + vet + tests on macOS, Linux, and Windows; all three are green.
-Windows window present was ported to the modern textured-quad GLES blit so it
-builds again; displaying a window there is not yet runtime-verified (see
-[`specs/README.md`](specs/README.md), Known issues).
+CI runs build + vet + tests on macOS, Linux, and Windows, plus dedicated jobs
+for the GL, Vulkan and D3D12 backends and for the X11 and Win32 windowed
+present; all green. Per-spec status is in
+[`specs/README.md`](specs/README.md).
