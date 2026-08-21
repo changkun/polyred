@@ -1,6 +1,6 @@
 ---
 title: "cgo-free windowed present: archive the cgo windowing toy"
-status: in progress (all platforms cgo-free; linux runtime pending CI)
+status: complete (all platforms cgo-free; linux and windows runtime CI-verified)
 depends_on:
   - foundations/gpu-windowed-present.md
 affects:
@@ -46,7 +46,7 @@ brick gets the partial offscreen FFI verification that IS possible.
    events, window focus, modifier-key reporting (`flagsChanged:`), trackpad scroll
    scaling, and Shift+left-drag pan controls. Darwin app builds `CGO_ENABLED=0` and
    imports neither `gpu/gl` nor `gpu/ctx/egl`. On-screen verified by the maintainer.
-3. **Linux window cgo-free (X11/EGL/GLES) — DONE (runtime pending CI).** Ported
+3. **Linux window cgo-free (X11/EGL/GLES) — DONE, CI-PROVEN.** Ported
    bottom-up, each layer its own commit (each builds `GOOS=linux CGO_ENABLED=0`):
    - **(a) `gpu/gl/gl_unix.go` -> purego GLES (DONE).** The last cgo in package
      `gl`. Each GL entry point is a typed Go func resolved with
@@ -85,8 +85,9 @@ brick gets the partial offscreen FFI verification that IS possible.
 
 ## Verification
 
-Darwin: on-screen, maintainer-verified (done). Windows: builds cgo-free; runtime
-unreachable here. Linux: CI-gatable, and now gated. `TestX11WindowedPresent`
+Darwin: on-screen, maintainer-verified (done). Windows: cgo-free, and the runtime
+is now CI-proven too (`TestWin32WindowedPresent` presents through Win32 + ANGLE in
+the `windows-present` job). Linux: CI-gatable, and now gated. `TestX11WindowedPresent`
 (`app/window_linux_test.go`) drives the real path without the blocking event loop
 (open X11 window -> `eglCreateWindowSurface` -> make current -> clear to opaque red
 -> `ReadPixels` and assert ~255,0,0,255). Red is sRGB-invariant and channel-specific
@@ -94,10 +95,11 @@ unreachable here. Linux: CI-gatable, and now gated. `TestX11WindowedPresent`
 exercise out-parameter marshaling. It runs in a new `x11-windowed-present` job in
 `gl-probe.yml` (Xvfb + Mesa llvmpipe + libEGL/libGLESv2), now `pull_request`-gated.
 It skips cleanly without a display/EGL runtime, so it is a no-op on a bare dev box.
-The remaining unknown only a CI run resolves: whether `eglCreateWindowSurface` on the
-X11 window matches a Mesa EGL config under Xvfb (the classic visual/config snag).
-Dev loop on darwin was: cross-compile `GOOS=linux CGO_ENABLED=0` locally; push for
-the Xvfb job to exercise it at runtime.
+The open question at drafting time (whether `eglCreateWindowSurface` on the X11
+window matches a Mesa EGL config under Xvfb, the classic visual/config snag) is
+resolved: it does, once the window is created with the EGL config's visual, and
+the job is green on main. Dev loop on darwin was: cross-compile `GOOS=linux
+CGO_ENABLED=0` locally; push for the Xvfb job to exercise it at runtime.
 
 ## Testing Strategy
 

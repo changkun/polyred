@@ -1,6 +1,6 @@
 ---
 title: Windowed present (Surface / swapchain) for the GPU abstraction
-status: drafted
+status: implemented for GL (on-screen present CI-verified); Metal drawable not implemented
 depends_on:
   - foundations/gpu-phase1-foundation.md
   - foundations/gpu-phase3-render.md
@@ -26,10 +26,12 @@ The backend-agnostic **Surface/swapchain API is implemented and CI-verified
 headless** (`gpu/surface.go`): `Device.CreateSurface`, `AcquireNextTexture`,
 `Present`, `Texture`, `Resize`. `TestSurfaceHeadlessPresent` renders frames
 through the swapchain on the GL backend (Mesa llvmpipe) and reads them back, with
-double-buffering and resize checks. What remains is the **on-screen** attachment
-(handing a swapchain texture to a window: a `CAMetalLayer` drawable on darwin, an
-EGL/WGL window surface elsewhere), which needs a display and is not verifiable in
-headless CI. The sections below describe that remaining on-screen layer.
+double-buffering and resize checks. The **on-screen** attachment has since
+landed for GL (`Device.CreateWindowSurface`): X11/EGL on linux and Win32/ANGLE on
+windows, both CI-verified headlessly (`TestX11WindowedPresent`,
+`TestWin32WindowedPresent`). What remains is the darwin equivalent, a
+`CAMetalLayer` drawable on the Metal backend (`metalBackend.newWindowSurface` is
+still unimplemented). The sections below describe that remaining Metal layer.
 
 ## Overview
 

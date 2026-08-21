@@ -1,6 +1,6 @@
 ---
 title: Unified CPU/GPU renderer: one abstraction, GPU by default, CPU fallback
-status: drafted
+status: in progress (migration steps 1-4 done, CI-verified); frontend tidy and ray-tracing mode remain
 depends_on:
   - foundations/gpu-phase3-render.md
   - foundations/gpu-gl-backend.md

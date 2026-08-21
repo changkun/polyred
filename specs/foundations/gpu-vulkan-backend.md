@@ -1,6 +1,6 @@
 ---
 title: cgo-free Vulkan compute backend for the GPU abstraction
-status: drafted (viability proven)
+status: implemented (compute backend, CI-verified on lavapipe); render pipeline not implemented
 depends_on:
   - foundations/gpu-gl-backend.md
 affects:
@@ -31,9 +31,10 @@ storage buffers, a shader module (GLSL compiled to SPIR-V by glslang), descripto
 set, compute pipeline, command buffer, `vkCmdDispatch`, queue submit, and reads
 the doubled result back, matching the CPU. About 14 Vulkan structs marshal
 correctly through purego. So the hard question ("does cgo-free Vulkan compute
-work?") is answered: yes. What remains is wiring it behind the `backend`
-interface and a Go to SPIR-V path so kernels are authored in Go (today via
-glslang).
+work?") is answered: yes. It is now wired behind the `backend` interface
+(`gpu/backend_vk.go`, `TestVulkanBackendCompute`, green in CI). What remains is
+the render pipeline and a Go to SPIR-V path so kernels are authored in Go (today
+via glslang).
 
 ## The hard part: shader input is SPIR-V, not text
 

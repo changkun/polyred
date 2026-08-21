@@ -1,6 +1,6 @@
 ---
 title: GPU Abstraction Phase 1 — Foundation (cgo-free Metal compute + Device API)
-status: drafted
+status: implemented (CI-verified)
 depends_on: []
 affects:
   - gpu/
@@ -212,9 +212,10 @@ is mechanical selector-by-selector translation, not a research problem.
   API is unchanged, so `app`/`gpu/ctx/ca` (still cgo) keep compiling.
 - **T1 (fold-in) — adjusted:** per review, work in place on the in-repo `gpu/`
   rather than a destructive move; retiring the unpublished `../gpu` repo is a
-  trivial cleanup deferred until the slice is fully proven. Loose end: the
-  `!darwin` GL demo (`gpu/tests/math_gl.go`) still imports pre-restructure paths
-  (`poly.red/internal/driver/egl|gles`) — pre-existing, fixed in Phase 2 (GL).
+  trivial cleanup deferred until the slice is fully proven. Both loose ends are
+  since closed: the sibling `../gpu` repo and its `go.work` member are gone, and
+  the stale-import `!darwin` GL demo (`gpu/tests/math_gl.go`) was removed in
+  Phase 2 (GL).
 - **T3 (Device API skeleton) — DONE** (commit `1e2b457`). `gpu/device.go` +
   `gpu/backend.go` + `gpu/backend_darwin.go`: the WebGPU-style compute API
   (Device/Queue/Buffer/BindGroupLayout/BindGroup/PipelineLayout/ComputePipeline/
@@ -225,6 +226,6 @@ is mechanical selector-by-selector translation, not a research problem.
   matches the CPU `math.Mat` results (`EqEps`, 1e-5), cgo-free. The §5a compute
   slice is proven end-to-end.
 
-**Status: Phase 1 compute slice COMPLETE.** Remaining Phase 1 cleanup: retire the
-unpublished `../gpu` repo (T1), fix the pre-existing stale GL imports in
-`gpu/tests/math_gl.go`. Then Phase 2 (cgo-free GL backend + Go→shader compiler).
+**Status: Phase 1 COMPLETE**, cleanup included: the unpublished `../gpu` repo is
+retired (T1) and the stale GL imports are gone. Phase 2 (cgo-free GL backend +
+Go→shader compiler) and Phase 3 (render slice) followed.

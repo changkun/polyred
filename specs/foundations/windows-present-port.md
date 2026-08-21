@@ -1,6 +1,6 @@
 ---
 title: Windows present path: port to the modern textured-quad GLES blit
-status: implemented (build); runtime deferred
+status: implemented (build); runtime CI-verified (Win32 + ANGLE present job)
 depends_on:
   - foundations/gpu-phase1-foundation.md
 affects:
@@ -127,7 +127,9 @@ No new failure modes.
   CGO_ENABLED=0 go build ./app ./gpu/gl ./gpu/ctx/egl` from darwin catches the
   `undefined` symbols and signature mismatches even though it cannot link a real
   binary; run it locally before pushing.
-- **Runtime windowing (deferred):** actually displaying a window + pumping
-  Win32 messages needs a Windows desktop session and is out of scope here; this
-  port makes Windows build and structurally mirrors the verified Linux present
-  path. Documented as such in `specs/README.md`.
+- **Runtime windowing (closed):** the runtime gap this spec deferred is now
+  covered. The Windows present path was later rebuilt on the Device API
+  (`gl-windowed-present-cleanup.md` brick 2, which deleted `app/ctx_gl_windows.go`
+  and `gpu/gl`), and `TestWin32WindowedPresent` (`app/window_windows_test.go`)
+  drives a real Win32 window + ANGLE surface headlessly in the dedicated
+  `windows-present` CI job (commits 18197a5/3bb7066/e435ec6), green on main.

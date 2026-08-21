@@ -1,6 +1,6 @@
 ---
 title: GPU Abstraction Phase 3 — Render slice (Metal, headless + windowed)
-status: drafted
+status: implemented (C1-C5, CI-verified); C6 windowed present not implemented on Metal
 depends_on:
   - foundations/gpu-phase1-foundation.md
   - foundations/gpu-phase2-goshader.md

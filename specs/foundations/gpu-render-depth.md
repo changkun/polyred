@@ -2,7 +2,7 @@
 title: "GPU render pipeline: depth buffer (forward-rasterizer brick 1)"
 status: implemented (CI-verified)
 depends_on:
-  - foundations/gpu-abstraction.md
+  - foundations/gpu-phase3-render.md
 affects:
   - gpu/render.go
   - gpu/backend.go

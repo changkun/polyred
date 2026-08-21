@@ -1,6 +1,6 @@
 ---
 title: GPU Abstraction Phase 2 — Go→shader compute compiler
-status: drafted
+status: implemented (CI-verified)
 depends_on:
   - foundations/gpu-phase1-foundation.md
 affects:

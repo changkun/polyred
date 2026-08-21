@@ -1,6 +1,6 @@
 ---
 title: cgo-free OpenGL ES backend for the GPU abstraction
-status: drafted
+status: implemented (CI-verified)
 depends_on:
   - foundations/gpu-phase1-foundation.md
   - foundations/gpu-phase2-goshader.md

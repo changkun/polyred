@@ -1,6 +1,6 @@
 ---
 title: "Lock CPU default shading to the author-once kernel"
-status: implemented (CI-pending)
+status: implemented (CI-verified)
 depends_on:
   - foundations/render-deferred-author-once.md
 affects:
@@ -66,7 +66,7 @@ example a `camPos.W` or directional-light seam) to fix, not a tolerance to widen
 The test IS the deliverable: it is the regression lock. It fails loudly if either
 shader drifts from the other, so a future edit to `FragmentShader` or
 `kernels.Shade` that breaks the shared core is caught on all platforms (it does
-not need a GPU). Verified passing locally; CI-pending.
+not need a GPU). Green in CI on all three platforms (`polyred` workflow).
 
 ## Out of scope (separate bounded specs)
 

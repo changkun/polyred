@@ -1,6 +1,6 @@
 ---
 title: "Render deferred: use the author-once kernel on the GPU"
-status: drafted
+status: implemented (CI-verified)
 depends_on:
   - foundations/author-once-kernels.md
   - foundations/render-pass-runner.md

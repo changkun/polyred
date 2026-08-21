@@ -1,6 +1,6 @@
 ---
 title: "GPU render pipeline: multiple render targets (forward-rasterizer brick 2)"
-status: implemented (CI-pending)
+status: implemented (CI-verified)
 depends_on:
   - foundations/gpu-render-depth.md
 affects:

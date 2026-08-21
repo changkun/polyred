@@ -1,6 +1,6 @@
 ---
 title: "GL windowed present via the Device API; retire gpu/gl + gpu/ctx/egl"
-status: complete (bricks 1-3 done; linux CI-proven, windows build-only)
+status: complete (bricks 1-3 done; linux and windows CI-proven)
 depends_on:
   - foundations/gpu-windowed-present.md
   - foundations/cgo-free-windowed-present.md
@@ -96,7 +96,7 @@ introducing a second GL-owning thread.
    opens the GL device first, reads `Device.WindowVisualID()`, and creates the
    window with that visual (`createX11Window`: XGetVisualInfo + XCreateColormap).
    `gpu/gl`+`gpu/ctx/egl` stay (windows still uses them).
-2. **Windows GL windowed present (build-only — user-approved) — DONE.**
+2. **Windows GL windowed present — DONE, CI-PROVEN.**
    `gpu/backend_gl.go` is now `//go:build linux || windows`. The EGL/GLES lib names
    and loader moved behind build-tagged `glDlopen`/`glDlsym`: linux keeps
    `purego.Dlopen(libEGL.so.1/libGLESv2.so.2, RTLD_NOW|GLOBAL)` byte-identically;
@@ -107,10 +107,12 @@ introducing a second GL-owning thread.
    now excludes windows. `app/window_windows.go` opens `gpu.Device`(GL,
    WithNativeDisplay(hdc)) + `CreateWindowSurface(hwnd)` (no visual matching: ANGLE
    takes the HWND directly) + `PresentImage`; deleted `app/ctx_gl_windows.go`.
-   Build-only verified (no Windows CI runtime). Sharpest runtime delta: relies on
-   ANGLE to load `d3dcompiler_47.dll` from the search path (the old path
-   LoadLibrary'd it explicitly). ANGLE may also not support surfaceless
-   `eglMakeCurrent` at init -- a real-hardware concern.
+   Runtime-verified since: `TestWin32WindowedPresent` (`app/window_windows_test.go`)
+   drives a real Win32 window + ANGLE surface in the dedicated `windows-present`
+   CI job, which provisions ANGLE (libEGL/libGLESv2/d3dcompiler from Edge or
+   Chrome) and presents headlessly on WARP. The drafting-time worries (ANGLE
+   finding `d3dcompiler_47.dll` on the search path, surfaceless `eglMakeCurrent`
+   at init) did not materialize.
 3. **Delete the old stack — DONE.** Removed `gpu/gl` and `gpu/ctx/egl` entirely
    (nothing imports them after bricks 1-2). The GPU backend's own purego EGL/GLES
    in `backend_gl.go` is the single GL stack now; `gpu/ctx/ca`+`gpu/mtl` (darwin
@@ -122,8 +124,9 @@ introducing a second GL-owning thread.
 - Linux: extended `TestX11WindowedPresent` (multi-frame + resize) under the
   Xvfb + Mesa `gl-probe` job (already `pull_request`-gated). This is the proof of
   both the present path and the thread/context model.
-- Windows: `GOOS=windows CGO_ENABLED=0 go build ./...` only; runtime is a real-
-  hardware follow-up.
+- Windows: `GOOS=windows CGO_ENABLED=0 go build ./...`, plus
+  `TestWin32WindowedPresent` under the ANGLE-on-WARP `windows-present` job
+  (commits 3bb7066, e435ec6).
 - Darwin: unchanged; native build + existing tests.
 
 ## Out of scope
