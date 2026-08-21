@@ -1,6 +1,6 @@
 ---
 title: "GPU material texture sampling + seam option B (forward->deferred, no CPU round-trip)"
-status: drafted (architecture locked: transliterate Query, no hardware samplers)
+status: in progress (architecture locked: transliterate Query, no hardware samplers; brick 1 done)
 depends_on:
   - foundations/gpu-forward-raster.md
 affects:
@@ -200,7 +200,7 @@ the current, already parity-gated path produces.
 Gate: a flat-material scene rendered with seam B matches seam A. Because no
 interpolation convention changes, this gate is **exact**.
 
-### Brick 1: compiler helper functions and `gpumath` gaps
+### Brick 1: compiler helper functions and `gpumath` gaps (DONE)
 
 `compileAll` (`gpu/shader/compile.go:160`) compiles **every** top-level func in a
 kernel source as its **own entry point**. There is no helper-function concept, so
@@ -220,6 +220,26 @@ Also fill the `gpumath` gaps the transliteration needs: `Trunc`, a `Modf` equiva
 Gate: device-free compiler tests (all platforms) that a multi-function source compiles
 to one entry point plus helpers on both MSL and GLSL, and a parity test that a helper
 using kernel matches its Go-as-CPU run.
+
+**Shipped** (`gpu/shader/compile.go`, `gpu/shader/helper_test.go`,
+`gpu/parity_shared_test.go`). A func opts out of being an entry point with a
+`//gpu:helper` directive, matching the existing `//gpu:vertex` convention. Opt-in by
+directive is what held the blast radius to zero: no kernel in the tree carries the
+directive, and the generated MSL and GLSL for `Shade`, `Shadow`, `AO` and `SRGB` were
+dumped before the change and diffed after, byte-identical in both languages.
+`TestHelperNotAnEntryPoint` is the discriminating gate (three kernels without the
+change, one with it) and `runHelperParity` runs a truncating bilinear blend on GL,
+Vulkan and Metal at tolerance 0, measured exact on Metal.
+
+One limit found while building it, and it constrains brick 2's kernel shape: **a helper
+cannot take a storage buffer.** GLSL ES 3.1 cannot pass an SSBO block to a function, so
+buffer indexing stays in the entry point. The sampler's texel fetches must therefore
+happen in the entry, with fetched values passed into the helpers, or the atlas access
+must be lifted differently. Decide this when writing `SampleBasecol`.
+
+`Trunc` and `Log2` are in `gpumath`. `Quant8` turned out not to be needed as a builtin:
+the uint8 truncation is expressed as a `//gpu:helper` written in Go, which is what
+helpers are for.
 
 ### Brick 2: the atlas and `kernels.SampleBasecol`, bit-exact
 
