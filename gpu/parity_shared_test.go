@@ -260,6 +260,66 @@ func runParity(t *testing.T, dev *gpu.Device, mk mkFunc) {
 	runShadingParity(t, dev, mk)
 	runTrigParity(t, dev, mk)
 	runAuthorOnceParity(t, dev, mk)
+	runHelperParity(t, dev, mk)
+}
+
+// helperKernelSrc exercises //gpu:helper lowering on a real device: a helper
+// calling another helper, and Trunc, which together are the shape the GPU
+// material sampler needs (a truncating bilinear blend). See
+// specs/foundations/gpu-material-texture-sampling.md, brick 1.
+const helperKernelSrc = `
+package kernels
+
+//gpu:helper
+func lerp8(a float32, b float32, t float32) float32 {
+	return Trunc(a + (b-a)*t)
+}
+
+//gpu:helper
+func bilerp8(p1 float32, p2 float32, p3 float32, p4 float32, fx float32, fy float32) float32 {
+	i1 := lerp8(p1, p2, fx)
+	i2 := lerp8(p3, p4, fx)
+	return lerp8(i1, i2, fy)
+}
+
+func HelperSample(gid uint, a []float32, out []float32) {
+	b := gid * 6
+	out[gid] = bilerp8(a[b], a[b+1], a[b+2], a[b+3], a[b+4], a[b+5])
+}
+`
+
+// cpuHelperSample is the Go oracle for helperKernelSrc, written the way the CPU
+// sampler quantizes: truncate at every blend, never round.
+func cpuHelperSample(a []float32, i int) float32 {
+	trunc := func(x float32) float32 { return float32(int32(x)) }
+	l8 := func(x, y, t float32) float32 { return trunc(x + (y-x)*t) }
+	b := i * 6
+	i1 := l8(a[b], a[b+1], a[b+4])
+	i2 := l8(a[b+2], a[b+3], a[b+4])
+	return l8(i1, i2, a[b+5])
+}
+
+func runHelperParity(t *testing.T, dev *gpu.Device, mk mkFunc) {
+	t.Helper()
+	const n = 64
+	a := make([]float32, n*6)
+	for i := 0; i < n; i++ {
+		// Texel values in [0,255] and blend weights in [0,1], the sampler's domain.
+		a[i*6] = float32((i * 7) % 256)
+		a[i*6+1] = float32((i*13 + 3) % 256)
+		a[i*6+2] = float32((i*29 + 11) % 256)
+		a[i*6+3] = float32((i*47 + 5) % 256)
+		a[i*6+4] = float32(i%17) / 16
+		a[i*6+5] = float32(i%11) / 10
+	}
+	want := make([]float32, n)
+	for i := 0; i < n; i++ {
+		want[i] = cpuHelperSample(a, i)
+	}
+	inputs := map[string][]float32{"a": a, "out": make([]float32, n)}
+	got := runCompute(t, dev, mk, helperKernelSrc, "HelperSample", inputs, "out", n)
+	// Truncation is exact on both sides, so any drift is a real divergence.
+	compareParity(t, dev, "gpu:helper truncating bilinear", got, want, 0)
 }
 
 // runAuthorOnceParity proves the unified-renderer thesis: the *same* kernel

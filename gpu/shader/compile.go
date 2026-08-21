@@ -80,6 +80,7 @@ var builtins = map[string]string{
 	"Pow": "pow", "Sqrt": "sqrt", "Sin": "sin", "Cos": "cos", "Tan": "tan",
 	"Atan": "atan", "Asin": "asin", "Acos": "acos", "Exp": "exp", "Log": "log",
 	"Floor": "floor", "Ceil": "ceil", "Round": "round", "Fract": "fract",
+	"Trunc": "trunc", "Log2": "log2",
 	"Clampf": "clamp", "Minf": "min", "Maxf": "max", "Absf": "abs",
 }
 
@@ -142,6 +143,70 @@ func stageOf(doc *ast.CommentGroup) Stage {
 	return StageCompute
 }
 
+// isHelperFn reports whether a func carries a //gpu:helper directive. Helpers are
+// not entry points: they are emitted as ordinary functions into every kernel
+// compiled from the same source, so one Go func can be called from a kernel
+// instead of being inlined by hand. Without the directive a func is an entry
+// point, which is what every kernel in the tree was before helpers existed.
+func isHelperFn(doc *ast.CommentGroup) bool {
+	if doc == nil {
+		return false
+	}
+	for _, c := range doc.List {
+		if strings.TrimSpace(c.Text) == "//gpu:helper" {
+			return true
+		}
+	}
+	return false
+}
+
+// compileHelper emits fn as a plain callable function rather than an entry point.
+// Parameters and the result must be scalars or gpumath vectors; a helper cannot
+// take a storage buffer, because GLSL ES 3.1 has no way to pass an SSBO block to
+// a function. Buffer indexing therefore stays in the entry point.
+func compileHelper(fn *ast.FuncDecl, structs map[string]*ast.StructType, glsl bool, helperTypes map[string]string) (string, error) {
+	if fn.Type.Results == nil || len(fn.Type.Results.List) != 1 {
+		return "", fmt.Errorf("helper %s must return exactly one value", fn.Name.Name)
+	}
+	c := &compiler{structs: structs, env: map[string]string{}, written: map[string]bool{}, glsl: glsl, helpers: helperTypes}
+
+	var sig []string
+	for _, p := range flattenParams(fn.Type.Params) {
+		tn, ok := identType(p.typ)
+		if !ok {
+			return "", fmt.Errorf("helper %s: parameter %q must be a scalar or vector", fn.Name.Name, p.name)
+		}
+		mt, ok := goToMSLType(tn)
+		if !ok {
+			return "", fmt.Errorf("helper %s: parameter %q: unsupported type %q", fn.Name.Name, p.name, tn)
+		}
+		c.env[p.name] = mt
+		sig = append(sig, fmt.Sprintf("%s %s", c.typ(mt), p.name))
+	}
+
+	rt, ok := identType(fn.Type.Results.List[0].Type)
+	if !ok {
+		return "", fmt.Errorf("helper %s: unsupported result type", fn.Name.Name)
+	}
+	ret, ok := goToMSLType(rt)
+	if !ok {
+		return "", fmt.Errorf("helper %s: unsupported result type %q", fn.Name.Name, rt)
+	}
+
+	bc := &compiler{structs: structs, env: c.env, written: c.written, glsl: glsl, helpers: helperTypes}
+	if err := bc.stmts(fn.Body.List, 1); err != nil {
+		return "", fmt.Errorf("helper %s: %w", fn.Name.Name, err)
+	}
+
+	// MSL needs the definition before its callers and marks it static so each
+	// kernel's module keeps it internal; GLSL declares functions at file scope.
+	kw := ""
+	if !glsl {
+		kw = "static "
+	}
+	return fmt.Sprintf("%s%s %s(%s) {\n%s}\n\n", kw, c.typ(ret), fn.Name.Name, strings.Join(sig, ", "), bc.buf.String()), nil
+}
+
 // Compile parses src and compiles every kernel function it finds to MSL,
 // returning them keyed by function name. Struct types referenced as uniform
 // parameters are emitted into each kernel's MSL.
@@ -165,7 +230,7 @@ func compileAll(src string, glsl bool) (map[string]*Kernel, error) {
 	}
 
 	structs := map[string]*ast.StructType{}
-	var funcs []*ast.FuncDecl
+	var funcs, helpers []*ast.FuncDecl
 	for _, d := range file.Decls {
 		switch decl := d.(type) {
 		case *ast.GenDecl:
@@ -178,9 +243,40 @@ func compileAll(src string, glsl bool) (map[string]*Kernel, error) {
 			}
 		case *ast.FuncDecl:
 			if decl.Recv == nil && decl.Body != nil {
-				funcs = append(funcs, decl)
+				if isHelperFn(decl.Doc) {
+					helpers = append(helpers, decl)
+				} else {
+					funcs = append(funcs, decl)
+				}
 			}
 		}
+	}
+
+	// Helpers are emitted into every kernel from this source, in source order so
+	// a helper can call one declared above it. With no helpers the prelude is
+	// empty and each kernel's output is byte-identical to what it was before.
+	// Collect helper result types before emitting any of them, so a helper can
+	// call another declared later in the file and kernels can infer call types.
+	helperTypes := map[string]string{}
+	for _, fn := range helpers {
+		if fn.Type.Results == nil || len(fn.Type.Results.List) != 1 {
+			return nil, fmt.Errorf("shader: helper %s must return exactly one value", fn.Name.Name)
+		}
+		rt, _ := identType(fn.Type.Results.List[0].Type)
+		mt, ok := goToMSLType(rt)
+		if !ok {
+			return nil, fmt.Errorf("shader: helper %s: unsupported result type %q", fn.Name.Name, rt)
+		}
+		helperTypes[fn.Name.Name] = mt
+	}
+
+	var prelude strings.Builder
+	for _, fn := range helpers {
+		src, err := compileHelper(fn, structs, glsl, helperTypes)
+		if err != nil {
+			return nil, fmt.Errorf("shader: %w", err)
+		}
+		prelude.WriteString(src)
 	}
 
 	out := map[string]*Kernel{}
@@ -188,9 +284,9 @@ func compileAll(src string, glsl bool) (map[string]*Kernel, error) {
 		var k *Kernel
 		var err error
 		if glsl {
-			k, err = compileKernelGLSL(fn, structs)
+			k, err = compileKernelGLSL(fn, structs, prelude.String(), helperTypes)
 		} else {
-			k, err = compileKernel(fn, structs)
+			k, err = compileKernel(fn, structs, prelude.String(), helperTypes)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("shader: kernel %s: %w", fn.Name.Name, err)
@@ -205,6 +301,7 @@ type compiler struct {
 	env     map[string]string // var name -> canonical (MSL-spelled) type
 	written map[string]bool   // buffer params written to (=> non-const)
 	glsl    bool              // emit GLSL type spellings instead of MSL
+	helpers map[string]string // //gpu:helper func name -> canonical result type
 	buf     strings.Builder
 }
 
@@ -292,11 +389,11 @@ func isSwizzle(s string) bool {
 	return true
 }
 
-func compileKernel(fn *ast.FuncDecl, structs map[string]*ast.StructType) (*Kernel, error) {
+func compileKernel(fn *ast.FuncDecl, structs map[string]*ast.StructType, helpers string, helperTypes map[string]string) (*Kernel, error) {
 	stage := stageOf(fn.Doc)
 	params := flattenParams(fn.Type.Params)
 
-	c := &compiler{structs: structs, env: map[string]string{}, written: map[string]bool{}}
+	c := &compiler{structs: structs, env: map[string]string{}, written: map[string]bool{}, helpers: helperTypes}
 
 	// First pass: detect which buffer params are written (appear on the LHS of
 	// an index assignment), so reads stay const.
@@ -410,7 +507,7 @@ func compileKernel(fn *ast.FuncDecl, structs map[string]*ast.StructType) (*Kerne
 	}
 
 	var body strings.Builder
-	bc := &compiler{structs: structs, env: c.env, written: c.written, buf: body}
+	bc := &compiler{structs: structs, env: c.env, written: c.written, buf: body, helpers: helperTypes}
 	if err := bc.stmts(fn.Body.List, 1); err != nil {
 		return nil, err
 	}
@@ -445,6 +542,7 @@ func compileKernel(fn *ast.FuncDecl, structs map[string]*ast.StructType) (*Kerne
 	for _, name := range usedStructs {
 		emitStruct(&msl, name, structs[name])
 	}
+	msl.WriteString(helpers)
 	fmt.Fprintf(&msl, "%s %s %s(%s) {\n%s}\n", kw, ret, fn.Name.Name, strings.Join(sig, ",\n    "), bc.buf.String())
 
 	return &Kernel{Name: fn.Name.Name, Stage: stage, Bindings: bindings, MSL: msl.String()}, nil
@@ -456,12 +554,12 @@ func compileKernel(fn *ast.FuncDecl, structs map[string]*ast.StructType) (*Kerne
 // UBO block, and the thread id from gl_GlobalInvocationID. The id is bound to an
 // int local (GLSL forbids mixing uint with int literals, which the kernels use
 // pervasively as in gid*4); explicit uint() conversions in the source still work.
-func compileKernelGLSL(fn *ast.FuncDecl, structs map[string]*ast.StructType) (*Kernel, error) {
+func compileKernelGLSL(fn *ast.FuncDecl, structs map[string]*ast.StructType, helpers string, helperTypes map[string]string) (*Kernel, error) {
 	if stage := stageOf(fn.Doc); stage != StageCompute {
 		return nil, fmt.Errorf("GLSL backend supports compute kernels only (no vertex/fragment yet)")
 	}
 	params := flattenParams(fn.Type.Params)
-	c := &compiler{structs: structs, env: map[string]string{}, written: map[string]bool{}, glsl: true}
+	c := &compiler{structs: structs, env: map[string]string{}, written: map[string]bool{}, glsl: true, helpers: helperTypes}
 
 	// First pass: which buffer params are written (so reads stay readonly).
 	ast.Inspect(fn.Body, func(n ast.Node) bool {
@@ -545,7 +643,7 @@ func compileKernelGLSL(fn *ast.FuncDecl, structs map[string]*ast.StructType) (*K
 	}
 
 	var body strings.Builder
-	bc := &compiler{structs: structs, env: c.env, written: c.written, glsl: true, buf: body}
+	bc := &compiler{structs: structs, env: c.env, written: c.written, glsl: true, buf: body, helpers: helperTypes}
 	if err := bc.stmts(fn.Body.List, 1); err != nil {
 		return nil, err
 	}
@@ -555,7 +653,12 @@ func compileKernelGLSL(fn *ast.FuncDecl, structs map[string]*ast.StructType) (*K
 	for _, d := range decls {
 		src.WriteString(d + "\n")
 	}
-	src.WriteString("\nvoid main() {\n")
+	if helpers != "" {
+		src.WriteString("\n" + helpers)
+		src.WriteString("void main() {\n")
+	} else {
+		src.WriteString("\nvoid main() {\n")
+	}
 	fmt.Fprintf(&src, "    int %s = int(gl_GlobalInvocationID.x);\n", c.name(idName))
 	src.WriteString(bc.buf.String())
 	src.WriteString("}\n")
@@ -999,6 +1102,19 @@ func (c *compiler) call(ex *ast.CallExpr) (string, error) {
 		}
 		return fmt.Sprintf("%s(%s)", c.typ(mt), strings.Join(args, ", ")), nil
 	}
+	// A //gpu:helper declared in the same source is callable by name; it is
+	// emitted verbatim into this kernel, so the call needs no rewriting.
+	if _, ok := c.helpers[id.Name]; ok {
+		var args []string
+		for _, a := range ex.Args {
+			v, err := c.expr(a)
+			if err != nil {
+				return "", err
+			}
+			args = append(args, v)
+		}
+		return fmt.Sprintf("%s(%s)", id.Name, strings.Join(args, ", ")), nil
+	}
 	msl, ok := builtins[id.Name]
 	if !ok {
 		return "", fmt.Errorf("call to %q is not in the builtin/conversion whitelist", id.Name)
@@ -1040,6 +1156,10 @@ func (c *compiler) inferType(e ast.Expr) string {
 			}
 		}
 		if id, ok := ex.Fun.(*ast.Ident); ok {
+			// A //gpu:helper call has the result type it was declared with.
+			if rt, ok := c.helpers[id.Name]; ok {
+				return rt
+			}
 			if mt, ok := goToMSLType(id.Name); ok {
 				return mt
 			}

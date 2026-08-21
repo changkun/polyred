@@ -82,6 +82,8 @@ func Acos(x float32) float32   { return float32(math.Acos(float64(x))) }
 func Exp(x float32) float32    { return float32(math.Exp(float64(x))) }
 func Log(x float32) float32    { return float32(math.Log(float64(x))) }
 func Floor(x float32) float32  { return float32(math.Floor(float64(x))) }
+func Trunc(x float32) float32  { return float32(math.Trunc(float64(x))) }
+func Log2(x float32) float32   { return float32(math.Log2(float64(x))) }
 func Ceil(x float32) float32   { return float32(math.Ceil(float64(x))) }
 func Round(x float32) float32  { return float32(math.Round(float64(x))) }
 func Absf(x float32) float32   { return float32(math.Abs(float64(x))) }
