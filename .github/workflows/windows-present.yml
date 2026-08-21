@@ -1,9 +1,9 @@
 name: windows-present
 
 # Runs the Win32 + ANGLE windowed present path (TestWin32WindowedPresent) for real:
-# ANGLE (libEGL/libGLESv2/d3dcompiler) is not on the runner's PATH by default, but
-# it ships with every Chromium-based install (Edge, the WebView2 runtime, Chrome);
-# find one wherever the current runner image put it, then run the test with
+# ANGLE (libEGL/libGLESv2) is not on the runner's PATH by default, but every major
+# browser ships a build of it; find whichever one the current runner image has (as
+# of 2026-08 that is Firefox, not Edge or Chrome), then run the test with
 # POLYRED_REQUIRE_WINDOW=1 so a skip (ANGLE missing / window surface failing) becomes
 # a hard failure. This is the Windows analog of the gl-probe x11-windowed-present job.
 # A dedicated workflow (not a polyred matrix step) so the ANGLE provisioning is
@@ -31,13 +31,14 @@ jobs:
         go-version: '1.26.x'
         check-latest: true
 
-    - name: Provision ANGLE (libEGL/libGLESv2/d3dcompiler from any Chromium install)
+    - name: Provision ANGLE (find a browser's libEGL/libGLESv2 and put it on PATH)
       shell: pwsh
       run: |
         # Do not pin a browser or a version directory: the runner image moves these
         # between releases, and hardcoding "Edge or Chrome" is what broke this job.
-        # As of the 2026-08 image, Edge and Chrome no longer ship libEGL.dll at all;
-        # Firefox does. So search every vendor that ships an ANGLE build.
+        # As of the 2026-08 image, Edge and Chrome no longer ship libEGL.dll at all
+        # and Firefox is what provides it. So search every vendor that ships ANGLE,
+        # Chromium-based or not, and let the log say which one was used.
         $vendors = @(
           "Microsoft\EdgeWebView\Application",
           "Microsoft\Edge\Application",
