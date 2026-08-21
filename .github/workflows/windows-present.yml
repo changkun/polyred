@@ -2,7 +2,8 @@ name: windows-present
 
 # Runs the Win32 + ANGLE windowed present path (TestWin32WindowedPresent) for real:
 # ANGLE (libEGL/libGLESv2/d3dcompiler) is not on the runner's PATH by default, but
-# it ships with Edge/Chrome; provision it, then run the test with
+# it ships with every Chromium-based install (Edge, the WebView2 runtime, Chrome);
+# find one wherever the current runner image put it, then run the test with
 # POLYRED_REQUIRE_WINDOW=1 so a skip (ANGLE missing / window surface failing) becomes
 # a hard failure. This is the Windows analog of the gl-probe x11-windowed-present job.
 # A dedicated workflow (not a polyred matrix step) so the ANGLE provisioning is
@@ -30,28 +31,53 @@ jobs:
         go-version: '1.26.x'
         check-latest: true
 
-    - name: Provision ANGLE (libEGL/libGLESv2/d3dcompiler from Edge or Chrome)
+    - name: Provision ANGLE (libEGL/libGLESv2/d3dcompiler from any Chromium install)
       shell: pwsh
       run: |
+        # Do not pin a browser or a version directory: the runner image moves these
+        # between releases, and hardcoding "Edge or Chrome" is what broke this job.
+        # Take the first install that has libEGL.dll AND libGLESv2.dll side by side.
         $roots = @(
+          "C:\Program Files (x86)\Microsoft\EdgeWebView\Application",
+          "C:\Program Files\Microsoft\EdgeWebView\Application",
           "C:\Program Files (x86)\Microsoft\Edge\Application",
           "C:\Program Files\Microsoft\Edge\Application",
           "C:\Program Files\Google\Chrome\Application",
           "C:\Program Files (x86)\Google\Chrome\Application"
-        )
-        $egl = $null
-        foreach ($r in $roots) {
-          if (Test-Path $r) {
-            $egl = Get-ChildItem $r -Recurse -Filter libEGL.dll -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($egl) { break }
-          }
+        ) | Where-Object { Test-Path $_ }
+
+        function Find-Angle($paths) {
+          Get-ChildItem $paths -Recurse -Filter libEGL.dll -ErrorAction SilentlyContinue |
+            Where-Object { Test-Path (Join-Path $_.DirectoryName "libGLESv2.dll") } |
+            Select-Object -First 1
         }
-        if (-not $egl) { Write-Error "ANGLE libEGL.dll not found in Edge/Chrome"; exit 1 }
+
+        $egl = $null
+        if ($roots) { $egl = Find-Angle $roots }
+
+        # Fall back to a sweep of both Program Files trees. Slower, but the
+        # alternative is a red job whose log does not say what is installed.
+        if (-not $egl) {
+          Write-Host "ANGLE not in the known roots; sweeping Program Files."
+          $sweep = @("C:\Program Files", "C:\Program Files (x86)") | Where-Object { Test-Path $_ }
+          $egl = Find-Angle $sweep
+        }
+
+        if (-not $egl) {
+          Write-Host "No ANGLE on this runner. Installed under Program Files:"
+          Get-ChildItem "C:\Program Files", "C:\Program Files (x86)" -Directory -ErrorAction SilentlyContinue |
+            ForEach-Object { Write-Host "  $($_.FullName)" }
+          Write-Error "libEGL.dll + libGLESv2.dll not found; provisioning needs a new source"
+          exit 1
+        }
+
         $dir = $egl.DirectoryName
         Write-Host "ANGLE found in: $dir"
         New-Item -ItemType Directory -Force -Path angle | Out-Null
         Copy-Item "$dir\libEGL.dll" angle\ -Force
         Copy-Item "$dir\libGLESv2.dll" angle\ -Force
+        # d3dcompiler_47.dll sits beside ANGLE in a browser install but is also a
+        # system DLL; ANGLE finds it on the search path either way.
         Copy-Item "$dir\d3dcompiler_47.dll" angle\ -Force -ErrorAction SilentlyContinue
         Get-ChildItem angle
         "$((Get-Location).Path)\angle" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
