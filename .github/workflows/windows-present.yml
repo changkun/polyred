@@ -36,31 +36,35 @@ jobs:
       run: |
         # Do not pin a browser or a version directory: the runner image moves these
         # between releases, and hardcoding "Edge or Chrome" is what broke this job.
-        # Take the first install that has libEGL.dll AND libGLESv2.dll side by side.
-        $roots = @(
-          "C:\Program Files (x86)\Microsoft\EdgeWebView\Application",
-          "C:\Program Files\Microsoft\EdgeWebView\Application",
-          "C:\Program Files (x86)\Microsoft\Edge\Application",
-          "C:\Program Files\Microsoft\Edge\Application",
-          "C:\Program Files\Google\Chrome\Application",
-          "C:\Program Files (x86)\Google\Chrome\Application"
-        ) | Where-Object { Test-Path $_ }
+        # As of the 2026-08 image, Edge and Chrome no longer ship libEGL.dll at all;
+        # Firefox does. So search every vendor that ships an ANGLE build.
+        $vendors = @(
+          "Microsoft\EdgeWebView\Application",
+          "Microsoft\Edge\Application",
+          "Google\Chrome\Application",
+          "Mozilla Firefox"
+        )
+        $roots = foreach ($pf in @("C:\Program Files", "C:\Program Files (x86)")) {
+          foreach ($v in $vendors) { Join-Path $pf $v }
+        }
+        $roots = $roots | Where-Object { Test-Path $_ }
 
-        function Find-Angle($paths) {
-          Get-ChildItem $paths -Recurse -Filter libEGL.dll -ErrorAction SilentlyContinue |
+        function Find-Angle($paths, $depth) {
+          Get-ChildItem $paths -Recurse -Depth $depth -Filter libEGL.dll -ErrorAction SilentlyContinue |
             Where-Object { Test-Path (Join-Path $_.DirectoryName "libGLESv2.dll") } |
             Select-Object -First 1
         }
 
         $egl = $null
-        if ($roots) { $egl = Find-Angle $roots }
+        if ($roots) { $egl = Find-Angle $roots 3 }
 
-        # Fall back to a sweep of both Program Files trees. Slower, but the
-        # alternative is a red job whose log does not say what is installed.
+        # Fall back to a shallow sweep of the vendor directories under Program Files.
+        # Bounded by -Depth on purpose: an unbounded -Recurse over both trees took ten
+        # minutes on the runner.
         if (-not $egl) {
-          Write-Host "ANGLE not in the known roots; sweeping Program Files."
+          Write-Host "ANGLE not in the known vendor paths; sweeping Program Files."
           $sweep = @("C:\Program Files", "C:\Program Files (x86)") | Where-Object { Test-Path $_ }
-          $egl = Find-Angle $sweep
+          $egl = Find-Angle $sweep 4
         }
 
         if (-not $egl) {
@@ -71,16 +75,16 @@ jobs:
           exit 1
         }
 
+        # Put the install directory itself on PATH rather than copying the two DLLs
+        # out of it. Every shipped ANGLE build links against siblings that live beside
+        # it (Firefox's needs mozglue.dll, Chromium's wants d3dcompiler_47.dll), so a
+        # copy of just libEGL + libGLESv2 loads as "the specified module could not be
+        # found" even though both files are present.
         $dir = $egl.DirectoryName
         Write-Host "ANGLE found in: $dir"
-        New-Item -ItemType Directory -Force -Path angle | Out-Null
-        Copy-Item "$dir\libEGL.dll" angle\ -Force
-        Copy-Item "$dir\libGLESv2.dll" angle\ -Force
-        # d3dcompiler_47.dll sits beside ANGLE in a browser install but is also a
-        # system DLL; ANGLE finds it on the search path either way.
-        Copy-Item "$dir\d3dcompiler_47.dll" angle\ -Force -ErrorAction SilentlyContinue
-        Get-ChildItem angle
-        "$((Get-Location).Path)\angle" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+        Get-ChildItem $dir -Filter "*.dll" | Where-Object { $_.Name -match "libEGL|libGLESv2|d3dcompiler|mozglue" } |
+          ForEach-Object { Write-Host "  $($_.Name) ($($_.Length) bytes)" }
+        $dir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
     - name: Windowed present (Win32 + ANGLE)
       env:
