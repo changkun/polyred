@@ -162,10 +162,40 @@ Each brick is bounded, lands with its own gate, and is CI-green before the next 
 No sampling at all. Prove the GPU-G-buffer to deferred plumbing while the risk is zero.
 
 The forward pass writes **textures**; `Shade` reads storage **buffers**. Closing the
-seam without a CPU hop therefore needs an on-device texture-to-buffer copy. Add
-`CopyTextureToBuffer` to the `gpu` API and both backends (Metal blit encoder,
-GL pixel-buffer path). This keeps `Shade`'s storage-buffer contract unchanged and is
-reusable well beyond this brick.
+seam without a CPU hop therefore needs an on-device texture-to-buffer copy:
+`CopyTextureToBuffer` on the `gpu` API and both backends. This keeps `Shade`'s
+storage-buffer contract unchanged and is reusable well beyond this brick.
+
+What each backend already has (checked, so the cost is not guessed):
+
+- **Metal**: `gpu/mtl` binds `MakeBlitCommandEncoder`, but only the texture-to-texture
+  `CopyFromTexture` selector. The texture-to-buffer selector
+  (`copyFromTexture:...toBuffer:destinationOffset:destinationBytesPerRow:...`) is new
+  FFI, following the established `objc.RegisterName` + `Send` pattern.
+- **GL**: `glReadPixels` reads to CPU memory only today, but `glBindBuffer` is already
+  loaded, so the path is a `GL_PIXEL_PACK_BUFFER` bound during `glReadPixels` and then
+  bound again as an SSBO. One buffer object, two targets, no copy.
+
+**Rejected alternative: write the G-buffer to SSBOs from the fragment shader.** This
+looks cheaper (the seam disappears instead of being bridged, and no new backend surface
+is needed), but it is **unsound**. Today the write goes through
+`layout(location = 0..2) out vec4` into RGBA32F MRT with the depth test on, so the ROP
+applies the depth test and the color write as one indivisible per-fragment operation:
+exactly one fragment's data reaches each pixel, deterministically. Fragment-shader
+buffer writes carry no such guarantee. In core GLES 3.1 and GL 4.x they are unordered
+with respect to other fragments covering the same pixel, and
+`layout(early_fragment_tests) in` controls only *whether* a fragment runs, not what
+order the survivors write in. Two fragments that both pass early-Z can write in either
+order, leaving the depth buffer correct while the G-buffer holds the farther fragment's
+attributes: a nondeterministic winner wherever geometry overlaps. Soundness would need
+`ARB_fragment_shader_interlock` (not core GLES, and not safe to assume from llvmpipe) or
+Metal raster order groups, neither of which the repo uses, and the GL oracle is exactly
+where the extension cannot be counted on. So the alternative is either wrong or
+unprovable in CI.
+
+The copy is **lossless**: all three G-buffer targets are `gpu.RGBA32Float` and depth is
+`gpu.Depth32Float` (`render/gpuforward.go:171-193`), so route A moves exactly the bytes
+the current, already parity-gated path produces.
 
 Gate: a flat-material scene rendered with seam B matches seam A. Because no
 interpolation convention changes, this gate is **exact**.
